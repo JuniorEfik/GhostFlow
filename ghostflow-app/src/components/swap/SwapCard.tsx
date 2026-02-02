@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
@@ -10,12 +10,21 @@ import {
   useBalancesContext,
   usePricesContext,
   formatBalance,
-  formatUsdValue,
 } from '@silentswap/react';
 import { useUserAddress } from '@/hooks/useUserAddress';
 import { useWalletModal } from '@solana/wallet-adapter-react-ui';
 import { useConnect } from 'wagmi';
 import { TokenSelector } from './TokenSelector';
+import { MinimumAmountPopup } from './MinimumAmountPopup';
+import { UserRejectedPopup } from './UserRejectedPopup';
+
+const MIN_SWAP_USDC = 10;
+
+/** Format USD with decimal point (e.g. $0.10) instead of comma */
+function formatUsdDot(value: number): string {
+  if (value == null || isNaN(value)) return '0.00';
+  return value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
 
 const DEFAULT_SOURCE = 'eip155:43114/erc20:0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E'; // USDC Avalanche
 const DEFAULT_DEST = 'eip155:1/erc20:0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48'; // USDC Ethereum
@@ -27,7 +36,7 @@ export function SwapCard({ mode: modeProp }: { mode?: 'swap' | 'send' } = {}) {
   const { connect, connectors } = useConnect();
   const { evmAddress, solAddress, isConnected } = useUserAddress();
   const { getAsset } = useAssetsContext();
-  const { balances } = useBalancesContext();
+  const { balances, refetch: refetchBalances } = useBalancesContext();
   const { getPrice } = usePricesContext();
 
   const {
@@ -59,7 +68,17 @@ export function SwapCard({ mode: modeProp }: { mode?: 'swap' | 'send' } = {}) {
     egressEstimatesLoading,
     fetchEstimates,
     swapError,
+    clearQuote,
+    wallet,
+    walletLoading,
+    authLoading,
   } = useSilentSwap();
+
+  const isPreparingWallet = authLoading || walletLoading;
+  const isWalletReady = !!wallet;
+  const [showMinAmountPopup, setShowMinAmountPopup] = useState(false);
+  const [minAmountPopupValue, setMinAmountPopupValue] = useState(0);
+  const [showUserRejectedPopup, setShowUserRejectedPopup] = useState(false);
 
   const SUPPORTED_USDC = new Set([
     'eip155:1/erc20:0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
@@ -87,6 +106,30 @@ export function SwapCard({ mode: modeProp }: { mode?: 'swap' | 'send' } = {}) {
       setSplits([1]);
     }
   }, [destinations.length, destinations[0]?.asset]);
+
+  // Refresh balances after successful swap
+  useEffect(() => {
+    if (orderComplete && orderId) {
+      refetchBalances();
+    }
+  }, [orderComplete, orderId, refetchBalances]);
+
+  // SDK catches errors internally and sets swapError (doesn't throw) - show friendly popup for user rejection
+  useEffect(() => {
+    if (!swapError) return;
+    const msg = swapError instanceof Error ? swapError.message : String(swapError);
+    const err = swapError as Error & { code?: number };
+    const isUserRejected =
+      msg.toLowerCase().includes('user rejected') ||
+      msg.toLowerCase().includes('rejected the request') ||
+      msg.toLowerCase().includes('user denied') ||
+      msg.toLowerCase().includes('rejected') ||
+      err?.code === 4001; // UserRejectedRequestError
+    if (isUserRejected) {
+      setShowUserRejectedPopup(true);
+      clearQuote();
+    }
+  }, [swapError, clearQuote]);
 
   useEffect(() => {
     if (mode === 'send' || destinations.length === 0) return;
@@ -138,6 +181,13 @@ export function SwapCard({ mode: modeProp }: { mode?: 'swap' | 'send' } = {}) {
       const dest = destinations[0];
       if (!dest) return;
 
+      const amount = parseFloat(inputAmount);
+      if (amount < MIN_SWAP_USDC) {
+        setMinAmountPopupValue(amount);
+        setShowMinAmountPopup(true);
+        return;
+      }
+
       if (!SUPPORTED_USDC.has(tokenIn.caip19)) {
         alert('Only USDC on Avalanche, Ethereum, or Solana is supported for private swaps.');
         return;
@@ -173,7 +223,21 @@ export function SwapCard({ mode: modeProp }: { mode?: 'swap' | 'send' } = {}) {
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error('Swap failed:', err);
-      alert(msg || 'Swap failed. Please try again.');
+      const isUserRejected =
+        msg.toLowerCase().includes('user rejected') ||
+        msg.toLowerCase().includes('rejected the request');
+      if (isUserRejected) {
+        setShowUserRejectedPopup(true);
+        return;
+      }
+      const isQuoteError =
+        msg.toLowerCase().includes('failed to get quote') ||
+        msg.toLowerCase().includes('500') ||
+        msg.toLowerCase().includes('internal server');
+      const displayMsg = isQuoteError
+        ? 'Quote service is temporarily unavailable. Please try again in a few moments.'
+        : msg || 'Swap failed. Please try again.';
+      alert(displayMsg);
     }
   };
 
@@ -250,14 +314,28 @@ export function SwapCard({ mode: modeProp }: { mode?: 'swap' | 'send' } = {}) {
             )}
           </div>
           <div className="flex items-center justify-between gap-2">
-            <input
-              type="text"
-              value={inputAmount}
-              onChange={(e) => setInputAmount(e.target.value)}
-              placeholder="0.0"
-              className="flex-1 bg-transparent text-2xl font-semibold text-white outline-none placeholder-white/30 min-w-0"
-              disabled={isSwapping}
-            />
+            <div className="flex-1 flex items-center gap-2 min-w-0">
+              <input
+                type="text"
+                value={inputAmount}
+                onChange={(e) => setInputAmount(e.target.value)}
+                placeholder="0.0"
+                className="flex-1 bg-transparent text-2xl font-semibold text-white outline-none placeholder-white/30 min-w-0"
+                disabled={isSwapping}
+              />
+              {tokenIn && balances[tokenIn.caip19] && balances[tokenIn.caip19].balance > BigInt(0) && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    setInputAmount(formatBalance(balances[tokenIn.caip19].balance, tokenIn))
+                  }
+                  disabled={isSwapping}
+                  className="shrink-0 px-3 py-1.5 rounded-lg bg-amber-500/20 text-amber-400 text-sm font-medium hover:bg-amber-500/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Max
+                </button>
+              )}
+            </div>
             <TokenSelector
               selectedAsset={tokenIn}
               onSelect={setTokenIn}
@@ -364,30 +442,30 @@ export function SwapCard({ mode: modeProp }: { mode?: 'swap' | 'send' } = {}) {
         <div className="rounded-xl bg-white/5 p-4 space-y-2 text-sm">
           <div className="flex justify-between text-white/70">
             <span>Service fee</span>
-            <span>${formatUsdValue(serviceFeeUsd) ?? '0.00'}</span>
+            <span>${formatUsdDot(serviceFeeUsd)}</span>
           </div>
           <div className="flex justify-between text-white/70">
             <span>Bridge fee (in)</span>
-            <span>${formatUsdValue(bridgeFeeIngressUsd) ?? '0.00'}</span>
+            <span>${formatUsdDot(bridgeFeeIngressUsd)}</span>
           </div>
           <div className="flex justify-between text-white/70">
             <span>Bridge fee (out)</span>
-            <span>${formatUsdValue(bridgeFeeEgressUsd) ?? '0.00'}</span>
+            <span>${formatUsdDot(bridgeFeeEgressUsd)}</span>
           </div>
           <div className="flex justify-between text-white/70">
             <span>Price impact</span>
             <span className="text-red-400/80">
-              -${formatUsdValue(slippageUsd) ?? '0.00'}
+              -${formatUsdDot(slippageUsd)}
             </span>
           </div>
           <div className="flex justify-between text-white/90 border-t border-white/10 pt-2 mt-2">
             <span>Total deducted</span>
-            <span>${formatUsdValue(totalDeductedUsd) ?? '0.00'}</span>
+            <span>${formatUsdDot(totalDeductedUsd)}</span>
           </div>
           {inputUsd > 0 && (
             <div className="flex justify-between text-white/90">
               <span>Est. you receive</span>
-              <span>≈${formatUsdValue(estReceiveUsd) ?? '0.00'}</span>
+              <span>≈${formatUsdDot(estReceiveUsd)}</span>
             </div>
           )}
           <p className="text-xs text-white/40 mt-2">
@@ -395,14 +473,25 @@ export function SwapCard({ mode: modeProp }: { mode?: 'swap' | 'send' } = {}) {
           </p>
         </div>
 
-        {/* Error */}
-        {swapError && (
-          <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/20">
-            <p className="text-sm text-red-400">
-              {swapError instanceof Error ? swapError.message : String(swapError)}
-            </p>
-          </div>
-        )}
+        {/* Error - hide for user rejection (we show UserRejectedPopup instead) */}
+        {swapError && (() => {
+          const msg = swapError instanceof Error ? swapError.message : String(swapError);
+          const err = swapError as Error & { code?: number };
+          const isUserRejected =
+            msg.toLowerCase().includes('user rejected') ||
+            msg.toLowerCase().includes('rejected the request') ||
+            msg.toLowerCase().includes('user denied') ||
+            msg.toLowerCase().includes('rejected') ||
+            err?.code === 4001;
+          if (isUserRejected) return null;
+          return (
+            <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/20">
+              <p className="text-sm text-red-400">
+                {msg}
+              </p>
+            </div>
+          );
+        })()}
 
         {/* Status */}
         {isSwapping && (
@@ -470,11 +559,25 @@ export function SwapCard({ mode: modeProp }: { mode?: 'swap' | 'send' } = {}) {
                 egressEstimatesLoading ||
                 !inputAmount ||
                 !tokenIn ||
-                !dest
+                !dest ||
+                isPreparingWallet ||
+                !isWalletReady
               }
               className="w-full py-4 rounded-xl bg-amber-400 text-black font-bold text-lg disabled:opacity-30 disabled:cursor-not-allowed hover:bg-amber-300 transition-colors disabled:hover:bg-amber-400"
             >
-              {isSwapping ? (mode === 'send' ? 'Sending...' : 'Swapping...') : mode === 'send' ? 'Send' : 'Swap'}
+              {isSwapping
+                ? mode === 'send'
+                  ? 'Sending...'
+                  : 'Swapping...'
+                : isPreparingWallet
+                  ? authLoading
+                    ? 'Sign in with wallet...'
+                    : 'Preparing wallet...'
+                  : !isWalletReady
+                    ? 'Wallet not ready'
+                    : mode === 'send'
+                      ? 'Send'
+                      : 'Swap'}
             </button>
           </div>
         ) : (
@@ -486,14 +589,38 @@ export function SwapCard({ mode: modeProp }: { mode?: 'swap' | 'send' } = {}) {
               egressEstimatesLoading ||
               !inputAmount ||
               !tokenIn ||
-              !dest
+              !dest ||
+              isPreparingWallet ||
+              !isWalletReady
             }
             className="w-full py-4 rounded-xl bg-amber-400 text-black font-bold text-lg disabled:opacity-30 disabled:cursor-not-allowed hover:bg-amber-300 transition-colors disabled:hover:bg-amber-400"
           >
-            {isSwapping ? (mode === 'send' ? 'Sending...' : 'Swapping...') : mode === 'send' ? 'Send' : 'Swap'}
+            {isSwapping
+              ? mode === 'send'
+                ? 'Sending...'
+                : 'Swapping...'
+              : isPreparingWallet
+                ? authLoading
+                  ? 'Sign in with wallet...'
+                  : 'Preparing wallet...'
+                : !isWalletReady
+                  ? 'Wallet not ready'
+                  : mode === 'send'
+                    ? 'Send'
+                    : 'Swap'}
           </button>
         )}
       </div>
+
+      <MinimumAmountPopup
+        isOpen={showMinAmountPopup}
+        onClose={() => setShowMinAmountPopup(false)}
+        currentAmount={minAmountPopupValue}
+      />
+      <UserRejectedPopup
+        isOpen={showUserRejectedPopup}
+        onClose={() => setShowUserRejectedPopup(false)}
+      />
     </div>
   );
 }

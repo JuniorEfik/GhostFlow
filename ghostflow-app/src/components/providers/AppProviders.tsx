@@ -10,6 +10,7 @@ import { WalletModalProvider } from '@solana/wallet-adapter-react-ui';
 import { PhantomWalletAdapter, SolflareWalletAdapter } from '@solana/wallet-adapter-wallets';
 import { useMemo } from 'react';
 import { SilentSwapProvider, useSolanaAdapter } from '@silentswap/react';
+import { BalanceAutoRefresher } from './BalanceAutoRefresher';
 import { createSilentSwapClient, ENVIRONMENT } from '@silentswap/sdk';
 import { useUserAddress } from '@/hooks/useUserAddress';
 
@@ -17,7 +18,7 @@ import '@solana/wallet-adapter-react-ui/styles.css';
 
 const queryClient = new QueryClient();
 
-const environment = ENVIRONMENT.MAINNET;
+const environment = ENVIRONMENT.STAGING;
 const client = createSilentSwapClient({ environment });
 
 function SilentSwapWrapper({ children }: { children: React.ReactNode }) {
@@ -63,6 +64,7 @@ function SilentSwapWrapper({ children }: { children: React.ReactNode }) {
       solanaConnection={solanaConnectionAdapter}
       solanaRpcUrl={process.env.NEXT_PUBLIC_SOLANA_RPC ?? 'https://solana-rpc.publicnode.com'}
     >
+      <BalanceAutoRefresher />
       {children}
     </SilentSwapProvider>
   );

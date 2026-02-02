@@ -51,9 +51,27 @@ const NATIVE_TOKEN_LOGOS: Record<string, string> = {
   'eip155:8453/slip44:60': `${TW_CDN}/base/info/logo.png`,
 };
 
+// Tokens that may be missing from Trust Wallet CDN - use CoinGecko
+const COINGECKO_OVERRIDES: Record<string, string> = {
+  // Avalanche USDC (USDC.e) - TW CDN often missing
+  'eip155:43114/erc20:0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E':
+    'https://assets.coingecko.com/coins/images/6319/small/usdc.png',
+  // Ethereum USDC
+  'eip155:1/erc20:0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48':
+    'https://assets.coingecko.com/coins/images/6319/small/usdc.png',
+  // Solana USDC
+  'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp/token:EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v':
+    'https://assets.coingecko.com/coins/images/6319/small/usdc.png',
+};
+
 function getTokenIconUrls(asset: AssetInfo): string[] {
   const caip19 = asset.caip19;
   const urls: string[] = [];
+
+  const coinGeckoOverride = COINGECKO_OVERRIDES[caip19];
+  if (coinGeckoOverride) {
+    urls.push(coinGeckoOverride);
+  }
 
   const nativeUrl = NATIVE_TOKEN_LOGOS[caip19];
   if (nativeUrl) {
