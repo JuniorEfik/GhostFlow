@@ -2,18 +2,27 @@
 
 import React, { useState } from 'react';
 import type { AssetInfo } from '@silentswap/sdk';
+import { getTokenDisplayLabel } from '@/lib/tokenDisplay';
 
 const TW_CDN = 'https://cdn.jsdelivr.net/gh/trustwallet/assets@master/blockchains';
 
-// CAIP2 -> Trust Wallet chain folder
+// CAIP2 -> Trust Wallet chain folder (only chains we use for USDC)
 const CHAIN_TO_TW: Record<string, string> = {
   'eip155:1': 'ethereum',
   'eip155:43114': 'avalanchec',
   'eip155:56': 'smartchain',
   'eip155:8453': 'base',
-  'eip155:42161': 'arbitrum',
   'eip155:10': 'optimism',
+  'eip155:42161': 'arbitrum',
   'eip155:137': 'polygon-pos',
+};
+
+// Chain badge icons - use when Trust Wallet CDN fails or returns wrong icon
+const CHAIN_ICON_OVERRIDES: Record<string, string> = {
+  'eip155:137':
+    'https://assets.coingecko.com/coins/images/4713/small/matic-token-icon.png',
+  'eip155:10':
+    'https://assets.coingecko.com/coins/images/25244/small/Optimism.png',
 };
 
 function getChainInfo(caip19: string): { caip2: string; chainSlug: string; chainIconUrl: string } {
@@ -36,28 +45,37 @@ function getChainInfo(caip19: string): { caip2: string; chainSlug: string; chain
   }
 
   const chainSlug = CHAIN_TO_TW[caip2] ?? `chain-${caip2.replace('eip155:', '')}`;
+  const overrideUrl = CHAIN_ICON_OVERRIDES[caip2];
   const twSlug = CHAIN_TO_TW[caip2] ?? 'ethereum';
   return {
     caip2,
     chainSlug,
-    chainIconUrl: `${TW_CDN}/${twSlug}/info/logo.png`,
+    chainIconUrl: overrideUrl ?? `${TW_CDN}/${twSlug}/info/logo.png`,
   };
 }
 
-const NATIVE_TOKEN_LOGOS: Record<string, string> = {
-  'eip155:1/slip44:60': `${TW_CDN}/ethereum/info/logo.png`,
-  'eip155:43114/slip44:9005': `${TW_CDN}/avalanchec/info/logo.png`,
-  'eip155:56/slip44:20000714': `${TW_CDN}/smartchain/info/logo.png`,
-  'eip155:8453/slip44:60': `${TW_CDN}/base/info/logo.png`,
-};
-
-// Tokens that may be missing from Trust Wallet CDN - use CoinGecko
+// USDC token icons (CoinGecko - app only uses USDC)
 const COINGECKO_OVERRIDES: Record<string, string> = {
   // Avalanche USDC (USDC.e) - TW CDN often missing
   'eip155:43114/erc20:0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E':
     'https://assets.coingecko.com/coins/images/6319/small/usdc.png',
   // Ethereum USDC
   'eip155:1/erc20:0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48':
+    'https://assets.coingecko.com/coins/images/6319/small/usdc.png',
+  // Base USDC
+  'eip155:8453/erc20:0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913':
+    'https://assets.coingecko.com/coins/images/6319/small/usdc.png',
+  // Polygon USDC (native)
+  'eip155:137/erc20:0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359':
+    'https://assets.coingecko.com/coins/images/6319/small/usdc.png',
+  // BSC USDC
+  'eip155:56/erc20:0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d':
+    'https://assets.coingecko.com/coins/images/6319/small/usdc.png',
+  // Arbitrum USDC (native)
+  'eip155:42161/erc20:0xaf88d065e77c8cC2239327C5EDb3A432268e5831':
+    'https://assets.coingecko.com/coins/images/6319/small/usdc.png',
+  // Optimism USDC (native)
+  'eip155:10/erc20:0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85':
     'https://assets.coingecko.com/coins/images/6319/small/usdc.png',
   // Solana USDC
   'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp/token:EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v':
@@ -71,20 +89,6 @@ function getTokenIconUrls(asset: AssetInfo): string[] {
   const coinGeckoOverride = COINGECKO_OVERRIDES[caip19];
   if (coinGeckoOverride) {
     urls.push(coinGeckoOverride);
-  }
-
-  const nativeUrl = NATIVE_TOKEN_LOGOS[caip19];
-  if (nativeUrl) {
-    urls.push(nativeUrl);
-    return urls;
-  }
-
-  if (caip19.includes('slip44:')) {
-    const caip2 = caip19.split('/')[0];
-    const twSlug = CHAIN_TO_TW[caip2];
-    if (twSlug) {
-      urls.push(`${TW_CDN}/${twSlug}/info/logo.png`);
-    }
   }
 
   if (caip19.startsWith('solana:')) {
@@ -129,7 +133,7 @@ function ChainBadge({
   const [imgError, setImgError] = useState(false);
   return (
     <div
-      className="absolute -bottom-0.5 -right-0.5 w-4 h-4 rounded-full bg-[#161616] border border-white/20 flex items-center justify-center overflow-hidden"
+      className="absolute -bottom-0.5 -right-0.5 w-4 h-4 rounded-full bg-gray-800 dark:bg-[#161616] border border-gray-400 dark:border-white/20 flex items-center justify-center overflow-hidden"
       title={chainSlug}
     >
       {!imgError ? (
@@ -141,7 +145,7 @@ function ChainBadge({
         />
       ) : (
         <div
-          className="w-full h-full flex items-center justify-center text-[8px] font-bold text-white/80 bg-white/10"
+          className="w-full h-full flex items-center justify-center text-[8px] font-bold text-gray-700 dark:text-white/80 bg-gray-200 dark:bg-white/10"
           style={{ lineHeight: 1 }}
         >
           {chainSlug.slice(0, 1).toUpperCase()}
@@ -196,7 +200,7 @@ export function TokenIcon({
         {useImg && (
           <img
             src={currentUrl}
-            alt={asset.symbol}
+            alt={getTokenDisplayLabel(asset)}
             className="w-full h-full object-cover"
             onError={handleImgError}
           />

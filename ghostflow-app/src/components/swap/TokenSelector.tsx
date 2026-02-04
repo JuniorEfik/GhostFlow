@@ -2,16 +2,19 @@
 
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { useAssetsContext, useBalancesContext, formatBalance, formatUsdValue } from '@silentswap/react';
-import type { AssetInfo } from '@silentswap/sdk';
-import { TokenIcon } from './TokenIcon';
+import { useAssetsContext, useBalancesContext, formatBalance } from '@silentswap/react';
 
-/** USDC tokens that support private swapping (Avalanche, Ethereum, Solana only) */
-const SUPPORTED_USDC_CAIP19 = new Set([
-  'eip155:1/erc20:0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', // USDC Ethereum
-  'eip155:43114/erc20:0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E', // USDC Avalanche
-  'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp/token:EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', // USDC Solana
-]);
+function formatUsdDot(value: number): string {
+  if (value == null || isNaN(value)) return '0.00';
+  return value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+import type { AssetInfo } from '@silentswap/sdk';
+import { getTokenDisplayLabel } from '@/lib/tokenDisplay';
+import { SUPPORTED_USDC_CAIP19 } from '@/lib/constants';
+import { useUserAddress } from '@/hooks/useUserAddress';
+import { TokenIcon } from './TokenIcon';
+import { ConnectWalletPopup } from './ConnectWalletPopup';
 
 interface TokenSelectorProps {
   selectedAsset: AssetInfo | null;
@@ -28,8 +31,11 @@ export function TokenSelector({
 }: TokenSelectorProps) {
   const [search, setSearch] = useState('');
   const [open, setOpen] = useState(false);
+  const [showConnectPopup, setShowConnectPopup] = useState(false);
   const [dropdownStyle, setDropdownStyle] = useState<React.CSSProperties>({});
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const { evmAddress, solAddress } = useUserAddress();
+  const hasWallet = !!(evmAddress || solAddress);
   const { getFilteredAssets, loading } = useAssetsContext();
   const { balances } = useBalancesContext();
 
@@ -84,20 +90,27 @@ export function TokenSelector({
       <button
         ref={triggerRef}
         type="button"
-        onClick={() => !disabled && setOpen(!open)}
+        onClick={() => {
+          if (disabled) return;
+          if (!hasWallet) {
+            setShowConnectPopup(true);
+            return;
+          }
+          setOpen(!open);
+        }}
         disabled={disabled}
-        className="flex items-center gap-2 px-3 py-2 rounded-xl bg-white/5 hover:bg-white/10 transition-colors min-w-[120px] disabled:opacity-50"
+        className="flex items-center gap-2 px-3 py-2 rounded-xl bg-gray-100 dark:bg-white/5 hover:bg-gray-200 dark:hover:bg-white/10 transition-colors min-w-[120px] disabled:opacity-50"
       >
         {selectedAsset ? (
           <>
             <TokenIcon asset={selectedAsset} size={32} showChainBadge />
-            <span className="font-medium truncate">{selectedAsset.symbol}</span>
+            <span className="font-medium truncate text-gray-900 dark:text-white">{(selectedAsset.symbol || 'USDC').toUpperCase()}</span>
           </>
         ) : (
-          <span className="text-white/60">Select token</span>
+          <span className="text-gray-600 dark:text-white/60">Select token</span>
         )}
         <svg
-          className={`w-4 h-4 text-white/60 transition-transform ${open ? 'rotate-180' : ''}`}
+          className={`w-4 h-4 text-gray-600 dark:text-white/60 transition-transform ${open ? 'rotate-180' : ''}`}
           fill="none"
           stroke="currentColor"
           viewBox="0 0 24 24"
@@ -117,22 +130,22 @@ export function TokenSelector({
             />
             <div
               style={dropdownStyle}
-              className="rounded-2xl bg-[#1a1a1a] border border-white/10 shadow-xl overflow-hidden flex flex-col max-h-80"
+              className="rounded-2xl bg-white dark:bg-[#1a1a1a] border border-gray-200 dark:border-white/10 shadow-xl overflow-hidden flex flex-col max-h-80"
             >
-              <div className="p-3 border-b border-white/10 shrink-0">
+              <div className="p-3 border-b border-gray-200 dark:border-white/10 shrink-0">
                 <input
                   type="text"
                   placeholder="Search name or symbol"
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
-                  className="w-full px-4 py-2 rounded-xl bg-white/5 border border-white/10 text-white placeholder-white/40 outline-none focus:border-amber-500/50"
+                  className="w-full px-4 py-2 rounded-xl bg-gray-50 dark:bg-white/5 border border-gray-300 dark:border-white/10 text-gray-900 dark:text-white placeholder-gray-500 dark:placeholder-white/40 outline-none focus:border-amber-500/50"
                 />
               </div>
               <div className="overflow-y-auto flex-1 min-h-0">
                 {loading ? (
-                  <div className="p-6 text-center text-white/50">Loading...</div>
+                  <div className="p-6 text-center text-gray-600 dark:text-white/50">Loading...</div>
                 ) : assets.length === 0 ? (
-                  <div className="p-6 text-center text-white/50">No tokens found</div>
+                  <div className="p-6 text-center text-gray-600 dark:text-white/50">No tokens found</div>
                 ) : (() => {
                   const withBalance = assets.filter((a) => {
                     const b = balances[a.caip19];
@@ -146,7 +159,7 @@ export function TokenSelector({
                     <>
                       {withBalance.length > 0 && (
                         <div className="px-4 pt-2 pb-1">
-                          <div className="text-xs font-medium text-amber-400/80 uppercase tracking-wider">
+                          <div className="text-xs font-medium text-amber-600 dark:text-amber-400/80 uppercase tracking-wider">
                             Your tokens
                           </div>
                         </div>
@@ -157,7 +170,7 @@ export function TokenSelector({
                       ? formatBalance(balanceInfo.balance, asset)
                       : null;
                     const usdStr = balanceInfo
-                      ? formatUsdValue(balanceInfo.usdValue)
+                      ? formatUsdDot(balanceInfo.usdValue)
                       : null;
                     return (
                       <button
@@ -167,22 +180,22 @@ export function TokenSelector({
                           onSelect(asset);
                           setOpen(false);
                         }}
-                        className="w-full flex items-center gap-3 px-4 py-3 hover:bg-white/5 transition-colors text-left"
+                        className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-100 dark:hover:bg-white/5 transition-colors text-left"
                       >
                         <TokenIcon asset={asset} size={40} showChainBadge />
                         <div className="flex-1 min-w-0">
-                          <div className="font-medium truncate">{asset.symbol}</div>
-                          <div className="text-sm text-white/50 truncate">{asset.name}</div>
+                          <div className="font-medium truncate text-gray-900 dark:text-white">{getTokenDisplayLabel(asset)}</div>
+                          <div className="text-sm text-gray-500 dark:text-white/50 truncate">{asset.name}</div>
                         </div>
                         {(balanceStr != null || usdStr != null) && (
                           <div className="text-right shrink-0">
                             {balanceStr != null && (
-                              <div className="font-medium text-white truncate max-w-[80px]" title={balanceStr}>
+                              <div className="font-medium text-gray-900 dark:text-white truncate max-w-[80px]" title={balanceStr}>
                                 {balanceStr}
                               </div>
                             )}
                             {usdStr != null && (
-                              <div className="text-sm text-white/50">
+                              <div className="text-sm text-gray-500 dark:text-white/50">
                                 ${usdStr}
                               </div>
                             )}
@@ -192,8 +205,8 @@ export function TokenSelector({
                     );
                   })}
                       {withoutBalance.length > 0 && (
-                        <div className="px-4 pt-3 pb-1 border-t border-white/5 mt-1">
-                          <div className="text-xs font-medium text-white/40 uppercase tracking-wider">
+                        <div className="px-4 pt-3 pb-1 border-t border-gray-200 dark:border-white/5 mt-1">
+                          <div className="text-xs font-medium text-gray-500 dark:text-white/40 uppercase tracking-wider">
                             All tokens
                           </div>
                         </div>
@@ -204,7 +217,7 @@ export function TokenSelector({
                       ? formatBalance(balanceInfo.balance, asset)
                       : null;
                     const usdStr = balanceInfo
-                      ? formatUsdValue(balanceInfo.usdValue)
+                      ? formatUsdDot(balanceInfo.usdValue)
                       : null;
                     return (
                       <button
@@ -214,22 +227,22 @@ export function TokenSelector({
                           onSelect(asset);
                           setOpen(false);
                         }}
-                        className="w-full flex items-center gap-3 px-4 py-3 hover:bg-white/5 transition-colors text-left"
+                        className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-100 dark:hover:bg-white/5 transition-colors text-left"
                       >
                         <TokenIcon asset={asset} size={40} showChainBadge />
                         <div className="flex-1 min-w-0">
-                          <div className="font-medium truncate">{asset.symbol}</div>
-                          <div className="text-sm text-white/50 truncate">{asset.name}</div>
+                          <div className="font-medium truncate text-gray-900 dark:text-white">{getTokenDisplayLabel(asset)}</div>
+                          <div className="text-sm text-gray-500 dark:text-white/50 truncate">{asset.name}</div>
                         </div>
                         {(balanceStr != null || usdStr != null) && (
                           <div className="text-right shrink-0">
                             {balanceStr != null && (
-                              <div className="font-medium text-white/60 truncate max-w-[80px]" title={balanceStr}>
+                              <div className="font-medium text-gray-600 dark:text-white/60 truncate max-w-[80px]" title={balanceStr}>
                                 {balanceStr}
                               </div>
                             )}
                             {usdStr != null && (
-                              <div className="text-sm text-white/40">
+                              <div className="text-sm text-gray-500 dark:text-white/40">
                                 ${usdStr}
                               </div>
                             )}
@@ -246,6 +259,10 @@ export function TokenSelector({
           </>,
           document.body
         )}
+      <ConnectWalletPopup
+        isOpen={showConnectPopup}
+        onClose={() => setShowConnectPopup(false)}
+      />
     </div>
   );
 }

@@ -1,11 +1,20 @@
 @import "tailwindcss";
 
+@custom-variant dark (&:where(.dark, .dark *));
+
 :root {
+  --background: #f3f4f6;
+  --foreground: #111827;
+  --card: #ffffff;
+  --border: rgba(0, 0, 0, 0.1);
+  --accent: #f59e0b;
+}
+
+html.dark {
   --background: #0d0d0d;
   --foreground: #ffffff;
   --card: #161616;
   --border: rgba(255, 255, 255, 0.1);
-  --accent: #f59e0b;
 }
 
 @theme inline {
@@ -37,16 +46,28 @@ body {
 }
 
 ::-webkit-scrollbar-track {
-  background: rgba(255, 255, 255, 0.05);
+  background: rgba(0, 0, 0, 0.05);
   border-radius: 4px;
+}
+
+html.dark ::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.05);
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.2);
+  background: rgba(0, 0, 0, 0.2);
   border-radius: 4px;
 }
 
+html.dark ::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+}
+
 ::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.3);
+}
+
+html.dark ::-webkit-scrollbar-thumb:hover {
   background: rgba(255, 255, 255, 0.3);
 }
 

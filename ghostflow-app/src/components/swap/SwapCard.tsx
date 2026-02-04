@@ -9,6 +9,7 @@ import {
   useAssetsContext,
   useBalancesContext,
   usePricesContext,
+  useOrdersContext,
   formatBalance,
 } from '@silentswap/react';
 import { useUserAddress } from '@/hooks/useUserAddress';
@@ -17,6 +18,8 @@ import { useConnect } from 'wagmi';
 import { TokenSelector } from './TokenSelector';
 import { MinimumAmountPopup } from './MinimumAmountPopup';
 import { UserRejectedPopup } from './UserRejectedPopup';
+import { SendToSelfPopup } from './SendToSelfPopup';
+import { SUPPORTED_USDC_CAIP19, SUPPORTED_USDC_LIST, DEFAULT_SOURCE, DEFAULT_DEST } from '@/lib/constants';
 
 const MIN_SWAP_USDC = 10;
 
@@ -26,9 +29,6 @@ function formatUsdDot(value: number): string {
   return value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-const DEFAULT_SOURCE = 'eip155:43114/erc20:0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E'; // USDC Avalanche
-const DEFAULT_DEST = 'eip155:1/erc20:0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48'; // USDC Ethereum
-
 export function SwapCard({ mode: modeProp }: { mode?: 'swap' | 'send' } = {}) {
   const pathname = usePathname();
   const mode = modeProp ?? (pathname === '/send' ? 'send' : 'swap');
@@ -37,6 +37,7 @@ export function SwapCard({ mode: modeProp }: { mode?: 'swap' | 'send' } = {}) {
   const { evmAddress, solAddress, isConnected } = useUserAddress();
   const { getAsset } = useAssetsContext();
   const { balances, refetch: refetchBalances } = useBalancesContext();
+  const { refreshOrders } = useOrdersContext();
   const { getPrice } = usePricesContext();
 
   const {
@@ -49,6 +50,7 @@ export function SwapCard({ mode: modeProp }: { mode?: 'swap' | 'send' } = {}) {
     setSplits,
     splits,
     updateDestinationContact,
+    swapTokens,
   } = useSwap();
 
   const {
@@ -76,15 +78,12 @@ export function SwapCard({ mode: modeProp }: { mode?: 'swap' | 'send' } = {}) {
 
   const isPreparingWallet = authLoading || walletLoading;
   const isWalletReady = !!wallet;
+  const [mounted, setMounted] = useState(false);
   const [showMinAmountPopup, setShowMinAmountPopup] = useState(false);
   const [minAmountPopupValue, setMinAmountPopupValue] = useState(0);
   const [showUserRejectedPopup, setShowUserRejectedPopup] = useState(false);
-
-  const SUPPORTED_USDC = new Set([
-    'eip155:1/erc20:0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
-    'eip155:43114/erc20:0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E',
-    'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp/token:EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
-  ]);
+  const [showSendToSelfPopup, setShowSendToSelfPopup] = useState(false);
+  const [inputUsd, setInputUsd] = useState(0);
 
   // Initialize default tokens
   useEffect(() => {
@@ -99,7 +98,7 @@ export function SwapCard({ mode: modeProp }: { mode?: 'swap' | 'send' } = {}) {
     if (
       destinations.length === 0 ||
       destinations.length > 1 ||
-      !SUPPORTED_USDC.has(destAsset)
+      !SUPPORTED_USDC_CAIP19.has(destAsset)
     ) {
       const contact = destinations[0]?.contact ?? '';
       setDestinations([{ asset: DEFAULT_DEST, contact, amount: '' }]);
@@ -107,12 +106,56 @@ export function SwapCard({ mode: modeProp }: { mode?: 'swap' | 'send' } = {}) {
     }
   }, [destinations.length, destinations[0]?.asset]);
 
-  // Refresh balances after successful swap
+  // Swap tab: if source and destination are same chain, switch destination to another chain
+  useEffect(() => {
+    if (mode !== 'swap' || !tokenIn || !destinations[0]?.asset) return;
+    const sourceChain = tokenIn.caip19.split('/')[0];
+    const destAsset = destinations[0].asset;
+    const destChain = destAsset.split('/')[0];
+    if (sourceChain !== destChain) return;
+    const otherCaip19 = SUPPORTED_USDC_LIST.find((caip19) => caip19.split('/')[0] !== sourceChain);
+    if (!otherCaip19) return;
+    const isNewDestSolana = otherCaip19.startsWith('solana:');
+    const evmChainMatch = otherCaip19.match(/^eip155:(\d+)/);
+    const evmChainId = evmChainMatch ? evmChainMatch[1] : '1';
+    const contact = isNewDestSolana && solAddress
+      ? `caip10:solana:*:${solAddress}`
+      : evmAddress
+        ? `caip10:eip155:${evmChainId}:${evmAddress}`
+        : destinations[0].contact ?? '';
+    setDestinations((prev) =>
+      prev.map((d, i) => (i === 0 ? { ...d, asset: otherCaip19, contact } : d))
+    );
+    setSplits([1]);
+    clearQuote();
+  }, [mode, tokenIn?.caip19, destinations[0]?.asset]);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  // Compute inputUsd in effect to avoid getPrice triggering PricesProvider update during render
+  useEffect(() => {
+    if (!tokenIn || !inputAmount) {
+      setInputUsd(0);
+      return;
+    }
+    const amount = parseFloat(inputAmount);
+    if (isNaN(amount) || amount <= 0) {
+      setInputUsd(0);
+      return;
+    }
+    const price = getPrice(tokenIn) || 1;
+    setInputUsd(amount * price);
+  }, [tokenIn, inputAmount, getPrice]);
+
+  // Refresh balances and orders after successful swap
   useEffect(() => {
     if (orderComplete && orderId) {
       refetchBalances();
+      refreshOrders();
     }
-  }, [orderComplete, orderId, refetchBalances]);
+  }, [orderComplete, orderId, refetchBalances, refreshOrders]);
 
   // SDK catches errors internally and sets swapError (doesn't throw) - show friendly popup for user rejection
   useEffect(() => {
@@ -131,6 +174,7 @@ export function SwapCard({ mode: modeProp }: { mode?: 'swap' | 'send' } = {}) {
     }
   }, [swapError, clearQuote]);
 
+  // Swap tab only: auto-fill recipient with connected wallet
   useEffect(() => {
     if (mode === 'send' || destinations.length === 0) return;
     const destAsset = destinations[0]?.asset || '';
@@ -188,12 +232,12 @@ export function SwapCard({ mode: modeProp }: { mode?: 'swap' | 'send' } = {}) {
         return;
       }
 
-      if (!SUPPORTED_USDC.has(tokenIn.caip19)) {
-        alert('Only USDC on Avalanche, Ethereum, or Solana is supported for private swaps.');
+      if (!SUPPORTED_USDC_CAIP19.has(tokenIn.caip19)) {
+        alert('Only USDC on Arbitrum, Avalanche, Base, BSC, Ethereum, Polygon, or Solana is supported for private swaps.');
         return;
       }
-      if (!SUPPORTED_USDC.has(dest.asset)) {
-        alert('Destination must be USDC on Avalanche, Ethereum, or Solana.');
+      if (!SUPPORTED_USDC_CAIP19.has(dest.asset)) {
+        alert('Destination must be USDC on Arbitrum, Avalanche, Base, BSC, Ethereum, Optimism, Polygon, or Solana.');
         return;
       }
 
@@ -211,6 +255,20 @@ export function SwapCard({ mode: modeProp }: { mode?: 'swap' | 'send' } = {}) {
       }
 
       if (!senderContactId) return;
+
+      // Block send-to-self
+      const destContact = dest.contact ?? '';
+      if (destContact && destContact === senderContactId) {
+        setShowSendToSelfPopup(true);
+        return;
+      }
+      // Also check by address (in case of different chain formats for same address)
+      const destAddr = destContact.split(':').pop()?.toLowerCase() ?? '';
+      const senderAddr = senderContactId.split(':').pop()?.toLowerCase() ?? '';
+      if (destAddr && senderAddr && destAddr === senderAddr) {
+        setShowSendToSelfPopup(true);
+        return;
+      }
 
       // Force single destination, 100% to output (no splits to ETH or other assets)
       await executeSwap({
@@ -249,8 +307,8 @@ export function SwapCard({ mode: modeProp }: { mode?: 'swap' | 'send' } = {}) {
   if (orderComplete && orderId) {
     return (
       <div className="p-6 rounded-2xl bg-emerald-500/10 border border-emerald-500/20">
-        <h2 className="text-xl font-bold text-emerald-400 mb-4">Swap Complete!</h2>
-        <p className="text-white/80 mb-2">Order ID: {orderId}</p>
+        <h2 className="text-xl font-bold text-emerald-600 dark:text-emerald-400 mb-4">Swap Complete!</h2>
+        <p className="text-gray-800 dark:text-white/80 mb-2">Order ID: {orderId}</p>
         <button
           onClick={handleNewSwap}
           className="mt-4 px-6 py-3 bg-amber-400 text-black font-semibold rounded-xl hover:bg-amber-300 transition-colors"
@@ -265,24 +323,20 @@ export function SwapCard({ mode: modeProp }: { mode?: 'swap' | 'send' } = {}) {
   const destAsset = dest ? getAsset(dest.asset) : null;
   const totalFeesUsd = serviceFeeUsd + bridgeFeeIngressUsd + bridgeFeeEgressUsd;
   const totalDeductedUsd = totalFeesUsd + slippageUsd;
-  const inputUsd =
-    tokenIn && inputAmount && parseFloat(inputAmount) > 0
-      ? parseFloat(inputAmount) * (getPrice(tokenIn) || 1)
-      : 0;
   const estReceiveUsd = Math.max(0, inputUsd - totalDeductedUsd);
 
   const recipientAddress = destinations[0]?.contact?.split(':').pop() ?? '';
 
   return (
-    <div className="rounded-2xl bg-[#161616] border border-white/10 overflow-hidden">
-      <div className="p-4 border-b border-white/10">
+    <div className="rounded-2xl bg-white dark:bg-[#161616] border border-gray-200 dark:border-white/10 overflow-hidden shadow-lg dark:shadow-none">
+      <div className="p-4 border-b border-gray-200 dark:border-white/10">
         <div className="flex gap-2">
           <Link
             href="/"
             className={`px-4 py-2 rounded-xl font-medium transition-colors ${
               mode === 'swap'
-                ? 'bg-amber-500/20 text-amber-400'
-                : 'text-white/60 hover:text-white'
+                ? 'bg-amber-500/20 text-amber-600 dark:text-amber-400'
+                : 'text-gray-600 hover:text-gray-900 dark:text-white/60 dark:hover:text-white'
             }`}
           >
             Swap
@@ -291,8 +345,8 @@ export function SwapCard({ mode: modeProp }: { mode?: 'swap' | 'send' } = {}) {
             href="/send"
             className={`px-4 py-2 rounded-xl font-medium transition-colors ${
               mode === 'send'
-                ? 'bg-amber-500/20 text-amber-400'
-                : 'text-white/60 hover:text-white'
+                ? 'bg-amber-500/20 text-amber-600 dark:text-amber-400'
+                : 'text-gray-600 hover:text-gray-900 dark:text-white/60 dark:hover:text-white'
             }`}
           >
             Send
@@ -300,13 +354,13 @@ export function SwapCard({ mode: modeProp }: { mode?: 'swap' | 'send' } = {}) {
         </div>
       </div>
 
-      <div className="p-4 space-y-4">
+      <div className="p-4 flex flex-col gap-4">
         {/* Input */}
-        <div className="rounded-xl bg-white/5 p-4 border border-white/10">
+        <div className="rounded-xl bg-gray-50 dark:bg-white/5 p-4 border border-gray-200 dark:border-white/10">
           <div className="flex justify-between items-center mb-2">
-            <span className="text-sm text-white/50">{mode === 'send' ? 'You send' : 'You pay'}</span>
+            <span className="text-sm text-gray-500 dark:text-white/50">{mode === 'send' ? 'You send' : 'You pay'}</span>
             {tokenIn && (
-              <span className="text-xs text-white/40">
+              <span className="text-xs text-gray-500 dark:text-white/40">
                 Balance: {balances[tokenIn.caip19]
                   ? formatBalance(balances[tokenIn.caip19].balance, tokenIn)
                   : '—'}
@@ -320,7 +374,7 @@ export function SwapCard({ mode: modeProp }: { mode?: 'swap' | 'send' } = {}) {
                 value={inputAmount}
                 onChange={(e) => setInputAmount(e.target.value)}
                 placeholder="0.0"
-                className="flex-1 bg-transparent text-2xl font-semibold text-white outline-none placeholder-white/30 min-w-0"
+                className="flex-1 bg-transparent text-2xl font-semibold text-gray-900 dark:text-white outline-none placeholder-gray-400 dark:placeholder-white/30 min-w-0"
                 disabled={isSwapping}
               />
               {tokenIn && balances[tokenIn.caip19] && balances[tokenIn.caip19].balance > BigInt(0) && (
@@ -330,7 +384,7 @@ export function SwapCard({ mode: modeProp }: { mode?: 'swap' | 'send' } = {}) {
                     setInputAmount(formatBalance(balances[tokenIn.caip19].balance, tokenIn))
                   }
                   disabled={isSwapping}
-                  className="shrink-0 px-3 py-1.5 rounded-lg bg-amber-500/20 text-amber-400 text-sm font-medium hover:bg-amber-500/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="shrink-0 px-3 py-1.5 rounded-lg bg-amber-500/20 text-amber-600 dark:text-amber-400 text-sm font-medium hover:bg-amber-500/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   Max
                 </button>
@@ -345,10 +399,51 @@ export function SwapCard({ mode: modeProp }: { mode?: 'swap' | 'send' } = {}) {
           </div>
         </div>
 
+        {/* Switch tokens (swap only) */}
+        {mode === 'swap' &&
+          tokenIn &&
+          destinations[0]?.asset &&
+          SUPPORTED_USDC_CAIP19.has(destinations[0].asset) && (
+          <div className="flex items-center justify-center h-12 -my-5 shrink-0">
+            <button
+              type="button"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                const dest = destinations[0];
+                if (!dest || !tokenIn) return;
+                swapTokens(inputAmount);
+                setDestinations((prev) => {
+                  const newDestAsset = prev[0]?.asset;
+                  if (!newDestAsset) return prev;
+                  const isNewDestSolana = newDestAsset.startsWith('solana:');
+                  const evmChainMatch = newDestAsset.match(/^eip155:(\d+)/);
+                  const evmChainId = evmChainMatch ? evmChainMatch[1] : '1';
+                  const contact =
+                    isNewDestSolana && solAddress
+                      ? `caip10:solana:*:${solAddress}`
+                      : evmAddress
+                        ? `caip10:eip155:${evmChainId}:${evmAddress}`
+                        : prev[0]?.contact ?? '';
+                  return prev.map((d, i) => (i === 0 ? { ...d, contact } : d));
+                });
+                clearQuote();
+              }}
+              disabled={isSwapping}
+              className="relative z-20 w-10 h-10 rounded-full bg-white dark:bg-[#161616] border-2 border-gray-300 dark:border-white/20 flex items-center justify-center text-gray-600 dark:text-white/70 hover:bg-gray-100 dark:hover:bg-white/10 hover:text-amber-500 hover:border-amber-500/50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-lg"
+              title="Switch tokens"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4" />
+              </svg>
+            </button>
+          </div>
+        )}
+
         {/* Output / Recipient */}
-        <div className="rounded-xl bg-white/5 p-4 border border-white/10">
+        <div className="rounded-xl bg-gray-50 dark:bg-white/5 p-4 border border-gray-200 dark:border-white/10">
           <div className="flex justify-between items-center mb-2">
-            <span className="text-sm text-white/50">
+            <span className="text-sm text-gray-500 dark:text-white/50">
               {mode === 'send' ? 'Recipient address' : 'You receive'}
             </span>
           </div>
@@ -375,21 +470,23 @@ export function SwapCard({ mode: modeProp }: { mode?: 'swap' | 'send' } = {}) {
                   }
                 }}
                 placeholder="0x... or base58 address"
-                className="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 text-white placeholder-white/40 outline-none focus:border-amber-500/50"
+                className="w-full px-4 py-3 rounded-xl bg-white dark:bg-white/5 border-2 border-gray-300 dark:border-white/10 text-gray-900 dark:text-white placeholder-gray-500 dark:placeholder-white/40 outline-none focus:border-amber-500/50"
                 disabled={isSwapping}
               />
               <div className="flex items-center gap-2">
-                <span className="text-sm text-white/50">They receive</span>
+                <span className="text-sm text-gray-500 dark:text-white/50">They receive</span>
                 <TokenSelector
                   selectedAsset={destAsset ?? null}
                   onSelect={(asset) => {
-                    const addr = recipientAddress || (evmAddress ?? solAddress ?? '');
+                    const addr = recipientAddress;
                     const evmChainMatch = asset.caip19.match(/^eip155:(\d+)/);
-                    const recipient = asset.caip19.startsWith('solana:')
-                      ? `caip10:solana:*:${addr}`
-                      : evmChainMatch
-                      ? `caip10:eip155:${evmChainMatch[1]}:${addr}`
-                      : `caip10:eip155:1:${addr}`;
+                    const recipient = addr
+                      ? asset.caip19.startsWith('solana:')
+                        ? `caip10:solana:*:${addr}`
+                        : evmChainMatch
+                        ? `caip10:eip155:${evmChainMatch[1]}:${addr}`
+                        : `caip10:eip155:1:${addr}`
+                      : '';
                     if (destinations.length > 0) {
                       setDestinations((prev) =>
                         prev.map((d, i) =>
@@ -407,7 +504,7 @@ export function SwapCard({ mode: modeProp }: { mode?: 'swap' | 'send' } = {}) {
             </div>
           ) : (
           <div className="flex items-center justify-between gap-2">
-            <span className="flex-1 text-2xl font-semibold text-white/60">
+            <span className="flex-1 text-2xl font-semibold text-gray-600 dark:text-white/60">
               {egressEstimatesLoading ? '...' : dest?.amount || '0.0'}
             </span>
             <TokenSelector
@@ -444,31 +541,31 @@ export function SwapCard({ mode: modeProp }: { mode?: 'swap' | 'send' } = {}) {
             <span>Service fee</span>
             <span>${formatUsdDot(serviceFeeUsd)}</span>
           </div>
-          <div className="flex justify-between text-white/70">
+          <div className="flex justify-between text-gray-700 dark:text-white/70">
             <span>Bridge fee (in)</span>
             <span>${formatUsdDot(bridgeFeeIngressUsd)}</span>
           </div>
-          <div className="flex justify-between text-white/70">
+          <div className="flex justify-between text-gray-700 dark:text-white/70">
             <span>Bridge fee (out)</span>
             <span>${formatUsdDot(bridgeFeeEgressUsd)}</span>
           </div>
-          <div className="flex justify-between text-white/70">
+          <div className="flex justify-between text-gray-700 dark:text-white/70">
             <span>Price impact</span>
-            <span className="text-red-400/80">
+            <span className="text-red-600 dark:text-red-400">
               -${formatUsdDot(slippageUsd)}
             </span>
           </div>
-          <div className="flex justify-between text-white/90 border-t border-white/10 pt-2 mt-2">
+          <div className="flex justify-between text-gray-900 dark:text-white/90 border-t border-gray-200 dark:border-white/10 pt-2 mt-2">
             <span>Total deducted</span>
             <span>${formatUsdDot(totalDeductedUsd)}</span>
           </div>
           {inputUsd > 0 && (
-            <div className="flex justify-between text-white/90">
+            <div className="flex justify-between text-gray-900 dark:text-white/90">
               <span>Est. you receive</span>
               <span>≈${formatUsdDot(estReceiveUsd)}</span>
             </div>
           )}
-          <p className="text-xs text-white/40 mt-2">
+          <p className="text-xs text-gray-500 dark:text-white/40 mt-2">
             Small amounts may have higher effective fees. Cross-chain swaps to Ethereum incur higher bridge costs.
           </p>
         </div>
@@ -486,7 +583,7 @@ export function SwapCard({ mode: modeProp }: { mode?: 'swap' | 'send' } = {}) {
           if (isUserRejected) return null;
           return (
             <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/20">
-              <p className="text-sm text-red-400">
+              <p className="text-sm text-red-600 dark:text-red-400">
                 {msg}
               </p>
             </div>
@@ -501,7 +598,7 @@ export function SwapCard({ mode: modeProp }: { mode?: 'swap' | 'send' } = {}) {
             </p>
             <div className="space-y-1">
               {orderStatusTexts.map((text, i) => (
-                <div key={i} className="flex items-center gap-2 text-sm text-white/80">
+                <div key={i} className="flex items-center gap-2 text-sm text-gray-800 dark:text-white/80">
                   <div className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
                   {text}
                 </div>
@@ -510,8 +607,18 @@ export function SwapCard({ mode: modeProp }: { mode?: 'swap' | 'send' } = {}) {
           </div>
         )}
 
-        {/* Connect / Swap button */}
-        {!isConnected ? (
+        {/* Connect / Swap button - defer wallet-dependent UI until mounted to avoid hydration mismatch */}
+        {!mounted ? (
+          <div className="space-y-2">
+            <div className="flex gap-2">
+              <div className="flex-1 py-4 rounded-xl bg-gray-100 dark:bg-white/10 border border-gray-200 dark:border-white/20 animate-pulse" />
+              <div className="flex-1 py-4 rounded-xl bg-gray-100 dark:bg-white/10 border border-gray-200 dark:border-white/20 animate-pulse" />
+            </div>
+            <p className="text-xs text-gray-500 dark:text-white/50 text-center">
+              For EVM ↔ Solana swaps, connect both via the header
+            </p>
+          </div>
+        ) : !isConnected ? (
           <div className="space-y-2">
             <div className="flex gap-2">
               <button
@@ -522,12 +629,12 @@ export function SwapCard({ mode: modeProp }: { mode?: 'swap' | 'send' } = {}) {
               </button>
               <button
                 onClick={() => setSolanaModalVisible(true)}
-                className="flex-1 py-4 rounded-xl bg-white/10 text-white font-bold hover:bg-white/20 transition-colors border border-white/20"
+                className="flex-1 py-4 rounded-xl bg-gray-100 dark:bg-white/10 text-gray-900 dark:text-white font-bold hover:bg-gray-200 dark:hover:bg-white/20 transition-colors border border-gray-300 dark:border-white/20"
               >
                 Connect Solana
               </button>
             </div>
-            <p className="text-xs text-white/50 text-center">
+            <p className="text-xs text-gray-500 dark:text-white/50 text-center">
               For EVM ↔ Solana swaps, connect both via the header
             </p>
           </div>
@@ -537,7 +644,7 @@ export function SwapCard({ mode: modeProp }: { mode?: 'swap' | 'send' } = {}) {
               {!evmAddress && (
                 <button
                   onClick={connectEVM}
-                  className="flex-1 py-4 rounded-xl bg-white/10 text-white font-bold hover:bg-white/20 transition-colors border border-white/20"
+                  className="flex-1 py-4 rounded-xl bg-gray-100 dark:bg-white/10 text-gray-900 dark:text-white font-bold hover:bg-gray-200 dark:hover:bg-white/20 transition-colors border border-gray-300 dark:border-white/20"
                 >
                   + Connect EVM
                 </button>
@@ -545,7 +652,7 @@ export function SwapCard({ mode: modeProp }: { mode?: 'swap' | 'send' } = {}) {
               {!solAddress && (
                 <button
                   onClick={() => setSolanaModalVisible(true)}
-                  className="flex-1 py-4 rounded-xl bg-white/10 text-white font-bold hover:bg-white/20 transition-colors border border-white/20"
+                  className="flex-1 py-4 rounded-xl bg-gray-100 dark:bg-white/10 text-gray-900 dark:text-white font-bold hover:bg-gray-200 dark:hover:bg-white/20 transition-colors border border-gray-300 dark:border-white/20"
                 >
                   + Connect Solana
                 </button>
@@ -620,6 +727,10 @@ export function SwapCard({ mode: modeProp }: { mode?: 'swap' | 'send' } = {}) {
       <UserRejectedPopup
         isOpen={showUserRejectedPopup}
         onClose={() => setShowUserRejectedPopup(false)}
+      />
+      <SendToSelfPopup
+        isOpen={showSendToSelfPopup}
+        onClose={() => setShowSendToSelfPopup(false)}
       />
     </div>
   );

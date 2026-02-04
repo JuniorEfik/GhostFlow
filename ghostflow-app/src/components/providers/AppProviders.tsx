@@ -11,6 +11,7 @@ import { PhantomWalletAdapter, SolflareWalletAdapter } from '@solana/wallet-adap
 import { useMemo } from 'react';
 import { SilentSwapProvider, useSolanaAdapter } from '@silentswap/react';
 import { BalanceAutoRefresher } from './BalanceAutoRefresher';
+import { ThemeProvider } from './ThemeProvider';
 import { createSilentSwapClient, ENVIRONMENT } from '@silentswap/sdk';
 import { useUserAddress } from '@/hooks/useUserAddress';
 
@@ -18,7 +19,9 @@ import '@solana/wallet-adapter-react-ui/styles.css';
 
 const queryClient = new QueryClient();
 
-const environment = ENVIRONMENT.STAGING;
+const envValue = process.env.NEXT_PUBLIC_ENVIRONMENT?.toUpperCase();
+const environment =
+  envValue === 'MAINNET' ? ENVIRONMENT.MAINNET : ENVIRONMENT.STAGING;
 const client = createSilentSwapClient({ environment });
 
 function SilentSwapWrapper({ children }: { children: React.ReactNode }) {
@@ -77,6 +80,7 @@ export function AppProviders({ children }: { children: React.ReactNode }) {
   );
 
   return (
+    <ThemeProvider>
     <QueryClientProvider client={queryClient}>
       <WagmiProvider config={config}>
         <ConnectionProvider
@@ -90,5 +94,6 @@ export function AppProviders({ children }: { children: React.ReactNode }) {
         </ConnectionProvider>
       </WagmiProvider>
     </QueryClientProvider>
+    </ThemeProvider>
   );
 }
