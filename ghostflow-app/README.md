@@ -121,6 +121,10 @@ Output: static export in `out/`. The app uses `output: 'export'` for static host
 
 For Netlify drag-and-drop: build with `.env.local` present, then copy `out/` into the deploy folder. See root `README.md` and `netlify-deploy/NETLIFY_ENV_REFERENCE.md`.
 
+### Hiding API keys in production
+
+With drag-and-drop deploy, RPC URLs (including API keys) are baked into the client. To hide keys: use **Git-based Netlify deploy**, set `NEXT_PUBLIC_SOLANA_USE_PROXY=true` and `NEXT_PUBLIC_USE_EVM_PROXY=true`, and add server-side env vars (no `NEXT_PUBLIC_` prefix). Variables without `NEXT_PUBLIC_` are only available on the server—Netlify reads them, and Next.js never exposes them to the client. See `netlify/functions/solana-rpc.js` and `evm-rpc.js`, and `NETLIFY_ENV_REFERENCE.md`.
+
 ## SDK Reference
 
 Main pieces:

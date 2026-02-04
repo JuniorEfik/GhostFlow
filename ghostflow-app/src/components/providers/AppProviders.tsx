@@ -14,8 +14,13 @@ import { BalanceAutoRefresher } from './BalanceAutoRefresher';
 import { ThemeProvider } from './ThemeProvider';
 import { createSilentSwapClient, ENVIRONMENT } from '@silentswap/sdk';
 import { useUserAddress } from '@/hooks/useUserAddress';
+import { getSolanaRpcUrls, createSolanaFallbackFetch } from '@/lib/solana-rpc';
 
 import '@solana/wallet-adapter-react-ui/styles.css';
+
+const solanaRpcUrls = getSolanaRpcUrls();
+const solanaPrimaryUrl = solanaRpcUrls[0];
+const solanaFetch = createSolanaFallbackFetch(solanaRpcUrls);
 
 const queryClient = new QueryClient();
 
@@ -65,7 +70,7 @@ function SilentSwapWrapper({ children }: { children: React.ReactNode }) {
       walletClient={effectiveWalletClient as any}
       solanaConnector={solanaConnector}
       solanaConnection={solanaConnectionAdapter}
-      solanaRpcUrl={process.env.NEXT_PUBLIC_SOLANA_RPC ?? 'https://solana-rpc.publicnode.com'}
+      solanaRpcUrl={solanaPrimaryUrl}
     >
       <BalanceAutoRefresher />
       {children}
@@ -84,7 +89,8 @@ export function AppProviders({ children }: { children: React.ReactNode }) {
     <QueryClientProvider client={queryClient}>
       <WagmiProvider config={config}>
         <ConnectionProvider
-          endpoint={process.env.NEXT_PUBLIC_SOLANA_RPC ?? 'https://solana-rpc.publicnode.com'}
+          endpoint={solanaPrimaryUrl}
+          config={{ commitment: 'confirmed', fetch: solanaFetch }}
         >
           <WalletProvider wallets={wallets} autoConnect>
             <WalletModalProvider>
