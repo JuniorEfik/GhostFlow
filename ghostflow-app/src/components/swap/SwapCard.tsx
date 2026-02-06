@@ -256,18 +256,19 @@ export function SwapCard({ mode: modeProp }: { mode?: 'swap' | 'send' } = {}) {
 
       if (!senderContactId) return;
 
-      // Block send-to-self
-      const destContact = dest.contact ?? '';
-      if (destContact && destContact === senderContactId) {
-        setShowSendToSelfPopup(true);
-        return;
-      }
-      // Also check by address (in case of different chain formats for same address)
-      const destAddr = destContact.split(':').pop()?.toLowerCase() ?? '';
-      const senderAddr = senderContactId.split(':').pop()?.toLowerCase() ?? '';
-      if (destAddr && senderAddr && destAddr === senderAddr) {
-        setShowSendToSelfPopup(true);
-        return;
+      // Block send-to-self only in Send mode (in Swap mode, receiving on your own address is expected)
+      if (mode === 'send') {
+        const destContact = dest.contact ?? '';
+        if (destContact && destContact === senderContactId) {
+          setShowSendToSelfPopup(true);
+          return;
+        }
+        const destAddr = destContact.split(':').pop()?.toLowerCase() ?? '';
+        const senderAddr = senderContactId.split(':').pop()?.toLowerCase() ?? '';
+        if (destAddr && senderAddr && destAddr === senderAddr) {
+          setShowSendToSelfPopup(true);
+          return;
+        }
       }
 
       // Force single destination, 100% to output (no splits to ETH or other assets)
@@ -280,7 +281,6 @@ export function SwapCard({ mode: modeProp }: { mode?: 'swap' | 'send' } = {}) {
       });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      console.error('Swap failed:', err);
       const isUserRejected =
         msg.toLowerCase().includes('user rejected') ||
         msg.toLowerCase().includes('rejected the request');

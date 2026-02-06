@@ -37,6 +37,17 @@ NEXT_PUBLIC_SOLANA_RPC=https://solana-rpc.publicnode.com
 NEXT_PUBLIC_INTEGRATOR_ID=your-integrator-id  # Optional: for SilentSwap tracking
 ```
 
+## Deploy on Netlify
+
+1. Push the repo to GitHub and connect it to [Netlify](https://app.netlify.com).
+2. Netlify will auto-detect the config from `netlify.toml`:
+   - **Base directory:** `ghostflow-app`
+   - **Build command:** `npm run build`
+3. Set environment variables in **Site settings → Environment variables**:
+   - `NEXT_PUBLIC_SOLANA_RPC` — Solana RPC URL (e.g. Helius, PublicNode)
+   - `NEXT_PUBLIC_INTEGRATOR_ID` — optional, for SilentSwap tracking
+4. Deploy.
+
 ## Project Structure
 
 ```

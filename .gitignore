@@ -5,16 +5,20 @@
 **/.next/
 out/
 build/
+.turbo/
 
 # Environment
 .env
 .env.local
+.env.netlify
 .env.*.local
 
 # Debug
 *.log
 npm-debug.log*
 .pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
 
 # IDE
 .idea/
@@ -28,3 +32,19 @@ Thumbs.db
 
 # Vercel
 .vercel
+
+# Netlify drag-and-drop deploy (generated from ghostflow-app/out)
+netlify-deploy/
+
+# Project-specific (reference/docs, not shipped)
+code.md
+PRESENTATION_BRIEF.md
+
+# Cache & build artifacts
+.eslintcache
+*.tsbuildinfo
+.cache/
+coverage/
+
+# Local Netlify folder
+.netlify

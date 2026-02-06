@@ -1,6 +1,5 @@
 'use client';
 
-import { useEffect } from 'react';
 import Link from 'next/link';
 
 interface ErrorProps {
@@ -9,11 +8,6 @@ interface ErrorProps {
 }
 
 export default function Error({ error, reset }: ErrorProps) {
-  useEffect(() => {
-    // Log error to console (or error reporting service in production)
-    console.error('Application error:', error);
-  }, [error]);
-
   return (
     <div className="min-h-[calc(100vh-4rem)] flex flex-col items-center justify-center px-4 py-12">
       <div className="max-w-md w-full text-center">
