@@ -14,3 +14,13 @@ export const SUPPORTED_USDC_LIST = Array.from(SUPPORTED_USDC_CAIP19);
 
 export const DEFAULT_SOURCE = 'eip155:43114/erc20:0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E'; // USDC Avalanche
 export const DEFAULT_DEST = 'eip155:1/erc20:0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48'; // USDC Ethereum
+
+// USDC decimals by chain - BSC uses 18, others use 6
+const USDC_DECIMALS_BY_CHAIN: Record<string, number> = {
+  'eip155:56': 18,
+};
+export const DEFAULT_USDC_DECIMALS = 6;
+export function getUsdcDecimals(caip19: string): number {
+  const chain = caip19.split('/')[0] || '';
+  return USDC_DECIMALS_BY_CHAIN[chain] ?? DEFAULT_USDC_DECIMALS;
+}

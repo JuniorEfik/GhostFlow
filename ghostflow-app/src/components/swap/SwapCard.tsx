@@ -19,7 +19,8 @@ import { TokenSelector } from './TokenSelector';
 import { MinimumAmountPopup } from './MinimumAmountPopup';
 import { UserRejectedPopup } from './UserRejectedPopup';
 import { SendToSelfPopup } from './SendToSelfPopup';
-import { SUPPORTED_USDC_CAIP19, SUPPORTED_USDC_LIST, DEFAULT_SOURCE, DEFAULT_DEST } from '@/lib/constants';
+import { InsufficientBalancePopup } from './InsufficientBalancePopup';
+import { SUPPORTED_USDC_CAIP19, SUPPORTED_USDC_LIST, DEFAULT_SOURCE, DEFAULT_DEST, getUsdcDecimals } from '@/lib/constants';
 
 const MIN_SWAP_USDC = 10;
 
@@ -83,6 +84,11 @@ export function SwapCard({ mode: modeProp }: { mode?: 'swap' | 'send' } = {}) {
   const [minAmountPopupValue, setMinAmountPopupValue] = useState(0);
   const [showUserRejectedPopup, setShowUserRejectedPopup] = useState(false);
   const [showSendToSelfPopup, setShowSendToSelfPopup] = useState(false);
+  const [showInsufficientBalancePopup, setShowInsufficientBalancePopup] = useState(false);
+  const [insufficientBalancePopupValues, setInsufficientBalancePopupValues] = useState<{
+    inputAmount: string;
+    availableBalance: string;
+  }>({ inputAmount: '0', availableBalance: '0' });
   const [inputUsd, setInputUsd] = useState(0);
 
   // Initialize default tokens
@@ -229,6 +235,20 @@ export function SwapCard({ mode: modeProp }: { mode?: 'swap' | 'send' } = {}) {
       if (amount < MIN_SWAP_USDC) {
         setMinAmountPopupValue(amount);
         setShowMinAmountPopup(true);
+        return;
+      }
+
+      // Check insufficient balance
+      const balanceInfo = balances[tokenIn.caip19];
+      const balanceRaw = balanceInfo?.balance ?? BigInt(0);
+      const decimals = getUsdcDecimals(tokenIn.caip19);
+      const availableAmount = Number(balanceRaw) / Math.pow(10, decimals);
+      if (amount > availableAmount) {
+        setInsufficientBalancePopupValues({
+          inputAmount: inputAmount,
+          availableBalance: formatBalance(balanceRaw, tokenIn),
+        });
+        setShowInsufficientBalancePopup(true);
         return;
       }
 
@@ -731,6 +751,13 @@ export function SwapCard({ mode: modeProp }: { mode?: 'swap' | 'send' } = {}) {
       <SendToSelfPopup
         isOpen={showSendToSelfPopup}
         onClose={() => setShowSendToSelfPopup(false)}
+      />
+      <InsufficientBalancePopup
+        isOpen={showInsufficientBalancePopup}
+        onClose={() => setShowInsufficientBalancePopup(false)}
+        inputAmount={insufficientBalancePopupValues.inputAmount}
+        availableBalance={insufficientBalancePopupValues.availableBalance}
+        action={mode}
       />
     </div>
   );
